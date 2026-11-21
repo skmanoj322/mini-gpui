@@ -5,8 +5,9 @@
 
 use std::{
     any::Any,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map},
     marker::PhantomData,
+    ops::Deref,
 };
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
@@ -16,6 +17,9 @@ struct App {
     entries: HashMap<EntityId, Box<dyn Any>>,
     next_id: usize,
     being_updated: HashSet<EntityId>,
+    observers: HashMap<EntityId, Vec<Box<dyn FnMut(&mut App)>>>,
+    pending_notifications: Vec<EntityId>,
+    update_depth: usize,
 }
 
 struct Entity<T> {
@@ -28,6 +32,9 @@ impl App {
             entries: HashMap::new(),
             next_id: 0,
             being_updated: HashSet::new(),
+            observers: HashMap::new(),
+            pending_notifications: Vec::new(),
+            update_depth: 0,
         }
     }
 
@@ -53,6 +60,7 @@ impl App {
         }
 
         self.being_updated.insert(entity.id);
+        self.update_depth += 1;
 
         match self
             .entries
@@ -64,15 +72,64 @@ impl App {
                 self.entries.insert(entity.id, value);
 
                 self.being_updated.remove(&entity.id);
+                self.update_depth -= 1;
+                if self.update_depth == 0 {
+                    self.flush_notifications();
+                }
                 return true;
             }
             None => {
                 self.being_updated.remove(&entity.id);
+                self.update_depth -= 1;
+                if self.update_depth == 0 {
+                    self.flush_notifications();
+                }
                 return false;
             }
         };
     }
+
+    //** there are two here like FnOnce I trid to implement here next is the impl FnMut(&mut App without static here
+    fn observe<T: 'static>(
+        &mut self,
+        entity: &Entity<T>,
+        callback: impl FnMut(&mut App) + 'static,
+    ) {
+        // push the closure to the vec here
+        // so here I have to push like if entityId is there then I have to push the code else I have to  create new one here
+
+        self.observers
+            .entry(entity.id)
+            .or_default()
+            .push(Box::new(callback));
+    }
+
+    fn notify(&mut self, id: EntityId) {
+        self.pending_notifications.push(id);
+    }
+
+    fn flush_notifications(&mut self) {
+        let notifications = std::mem::take(&mut self.pending_notifications);
+        // instead of clone I used the p
+        for id in notifications {
+            let callback = self.observers.remove(&id);
+
+            if let Some(mut closures) = callback {
+                for closure in closures.iter_mut() {
+                    closure(self)
+                }
+                self.observers.insert(id, closures);
+            }
+        }
+    }
 }
+
+// app.observe(&entity, |_app| {
+//     println!("counter changed!");
+// });
+//
+
+// app.notify(entity.id);   // should print "counter changed!"
 struct Counter {
     count: i32,
 }
@@ -80,23 +137,24 @@ struct Counter {
 fn main() {
     let mut app = App::new();
     let entity = app.insert(Counter { count: 5 });
-    let counter = app.read(&entity);
-
-    println!("{:?}", counter.map(|counter| counter.count)); // should print Some(5)
-
+    let entity_id = entity.id;
     let entity_copy = Entity {
         id: entity.id,
-        _marker: PhantomData,
+        _marker: PhantomData::<Counter>,
     };
+
+    app.observe(&entity, move |app| {
+        let count = app.read(&entity_copy).map(|counter| counter.count);
+        println!("observer sees: {:?}", count);
+    });
 
     app.update(&entity, |counter, app| {
         counter.count += 1;
-        let inner = app.update(&entity_copy, |counter: &mut Counter, _app| {
-            counter.count += 100;
-        });
-        println!("inner update worked? {inner}");
+        app.notify(entity_id); // notify INSIDE the update
     });
-
-    app.update(&entity, |counter, _app| counter.count += 1);
-    app.update(&entity, |counter, _app| counter.count += 1);
+    println!("--- second update ---");
+    app.update(&entity, |counter, app| {
+        counter.count += 1;
+        app.notify(entity_id);
+    });
 }
