@@ -7,7 +7,6 @@ use std::{
     any::Any,
     collections::{HashMap, HashSet},
     marker::PhantomData,
-    ops::Deref,
 };
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone)]
@@ -16,7 +15,7 @@ struct EntityId(usize);
 struct App {
     entries: HashMap<EntityId, Box<dyn Any>>,
     next_id: usize,
-    being_updates: HashSet<EntityId>,
+    being_updated: HashSet<EntityId>,
 }
 
 struct Entity<T> {
@@ -28,7 +27,7 @@ impl App {
         Self {
             entries: HashMap::new(),
             next_id: 0,
-            being_updates: HashSet::new(),
+            being_updated: HashSet::new(),
         }
     }
 
@@ -49,6 +48,12 @@ impl App {
     }
 
     fn update<T: 'static>(&mut self, entity: &Entity<T>, f: impl FnOnce(&mut T, &mut App)) -> bool {
+        if self.being_updated.contains(&entity.id) {
+            panic!("cannot update an entity while it is already being updated");
+        }
+
+        self.being_updated.insert(entity.id);
+
         match self
             .entries
             .remove(&entity.id)
@@ -57,9 +62,12 @@ impl App {
             Some(mut value) => {
                 f(&mut value, self);
                 self.entries.insert(entity.id, value);
+
+                self.being_updated.remove(&entity.id);
                 return true;
             }
             None => {
+                self.being_updated.remove(&entity.id);
                 return false;
             }
         };
@@ -88,4 +96,7 @@ fn main() {
         });
         println!("inner update worked? {inner}");
     });
+
+    app.update(&entity, |counter, _app| counter.count += 1);
+    app.update(&entity, |counter, _app| counter.count += 1);
 }
