@@ -62,7 +62,7 @@ impl App {
         self.being_updated.insert(entity.id);
         self.update_depth += 1;
 
-        match self
+        let updated = match self
             .entries
             .remove(&entity.id)
             .and_then(|b| b.downcast::<T>().ok())
@@ -71,22 +71,19 @@ impl App {
                 f(&mut value, self);
                 self.entries.insert(entity.id, value);
 
-                self.being_updated.remove(&entity.id);
-                self.update_depth -= 1;
-                if self.update_depth == 0 {
-                    self.flush_notifications();
-                }
-                return true;
+                true
             }
-            None => {
-                self.being_updated.remove(&entity.id);
-                self.update_depth -= 1;
-                if self.update_depth == 0 {
-                    self.flush_notifications();
-                }
-                return false;
-            }
+            None => false,
         };
+
+        self.being_updated.remove(&entity.id);
+
+        self.update_depth -= 1;
+        if self.update_depth == 0 {
+            self.flush_notifications();
+        }
+
+        updated
     }
 
     //** there are two here like FnOnce I trid to implement here next is the impl FnMut(&mut App without static here
