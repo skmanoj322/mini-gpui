@@ -1,0 +1,44 @@
+Doubts.
+
+Closures
+PhantomData
+
+
+
+
+
+PhantomData
+
+when I try to use the
+
+struct Entity<T> {
+    id: EntityId,
+}
+type parameter `T` is never used
+consider removing `T`, referring to it in a field, or using a marker such as `PhantomData`
+if you intended `T` to be a const parameter, use `const T: /* Type */` instead
+
+
+so now had to add the phantomdata here
+
+
+
+
+
+   fn update<T: 'static>(&mut self, entity: &Entity<T>, f: impl FnOnce(&mut T, &mut App)) -> bool {
+        match self
+            .entries
+            .get_mut(&entity.id)
+            .and_then(|b| b.downcast_mut::<T>())
+        {
+            Some(value) => {
+                f(value, self);
+                true
+            }
+            None => false,
+        }
+    }
+}
+// getting this error here
+cannot borrow `*self` as mutable more than once at a time
+second mutable borrow occurs here
